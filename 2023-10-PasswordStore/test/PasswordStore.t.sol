@@ -24,6 +24,18 @@ contract PasswordStoreTest is Test {
         assertEq(actualPassword, expectedPassword);
     }
 
+    function test_owner_can_read_password() public {
+        vm.startPrank(owner);
+        string memory secret_password = passwordStore.getPassword();
+        assertEq(keccak256(abi.encodePacked(secret_password)), keccak256(abi.encodePacked("myPassword")));
+    }
+
+    function test_non_owner_cannot_set_password() public {
+        vm.startPrank(address(1));
+        vm.expectRevert(PasswordStore.PasswordStore__NotOwner.selector);
+        passwordStore.setPassword("myNewPassword");
+    }
+
     function test_non_owner_reading_password_reverts() public {
         vm.startPrank(address(1));
         vm.expectRevert(PasswordStore.PasswordStore__NotOwner.selector);
@@ -40,7 +52,7 @@ contract PasswordStoreTest is Test {
         _;
     }
 
-    function test_non_owner_reading_password() public ownerChangePassword {
+    function test_non_owner_can_read_password() public ownerChangePassword {
         vm.startPrank(owner);
 
         string memory secret_password = passwordStore.getPassword();
