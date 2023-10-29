@@ -7,8 +7,8 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {Base64} from "lib/base64/base64.sol";
 import {VRFCoordinatorV2Interface} from "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import {VRFConsumerBaseV2} from "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-// Audit: Chainlink VRF.
 /// @title PuppyRaffle
 /// @author PuppyLoveDAO
 /// @notice This project is to enter a raffle to win a cute dog NFT. The protocol should do the following:
@@ -18,8 +18,18 @@ import {VRFConsumerBaseV2} from "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2
 /// 3. Users are allowed to get a refund of their ticket & `value` if they call the `refund` function
 /// 4. Every X seconds, the raffle will be able to draw a winner and be minted a random puppy
 /// 5. The owner of the protocol will set a feeAddress to take a cut of the `value`, and the rest of the funds will be sent to the winner of the puppy.
-contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
+contract PuppyRaffle is ERC721, VRFConsumerBaseV2, ReentrancyGuard, Ownable {
     using Address for address payable;
+
+    error PuppyRaffle__NotEnoughValue();
+    error PuppyRaffle__DuplicatePlayer();
+    error PuppyRaffle__OnlyPlayerCanRefund();
+    error PuppyRaffle__PlayerAlreadyRefundedOrNotActive();
+    error PuppyRaffle__RaffleNotOver();
+    error PuppyRaffle__NotEnoughPlayers();
+    error PuppyRaffle__FailToSelectWinnerFailToSendPrize();
+    error PuppyRaffle__FailToWithdrawNotEnoughPlayers();
+    error PuppyRaffle__FailToWithdrawFailToSendEther();
 
     uint256 public immutable entranceFee;
 
@@ -98,13 +108,11 @@ contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
         i_callbackGasLimit = _callbackGasLimit;
     }
 
-    // Gas fix.
-    // CEI violation.
     /// @notice this is how players enter the raffle
     /// @notice they have to pay the entrance fee * the number of players
     /// @notice duplicate entrants are not allowed
     /// @param newPlayers the list of players to enter the raffle
-    function enterRaffle(address[] memory newPlayers) public payable {
+    function enterRaffle(address[] memory newPlayers) public payable nonReentrant {
         require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
         for (uint256 i = 0; i < newPlayers.length; i++) {
             players.push(newPlayers[i]);
@@ -119,10 +127,9 @@ contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
         emit RaffleEnter(newPlayers);
     }
 
-    // CEI violation fix.
     /// @param playerIndex the index of the player to refund. You can find it externally by calling `getActivePlayerIndex`
     /// @dev This function will allow there to be blank spots in the array
-    function refund(uint256 playerIndex) public {
+    function refund(uint256 playerIndex) public nonReentrant {
         address playerAddress = players[playerIndex];
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
         require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
@@ -132,7 +139,6 @@ contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
         emit RaffleRefunded(playerAddress);
     }
 
-    // gas bad
     /// @notice a way to get the index in the array
     /// @param player the address of a player in the raffle
     /// @return the index of the player in the array, if they are not active, it returns 0
@@ -145,15 +151,13 @@ contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
         return 0;
     }
 
-    // CEI fix.
     /// @notice this function will select a winner and mint a puppy
     /// @notice there must be at least 4 players, and the duration has occurred
     /// @notice the previous winner is stored in the previousWinner variable
     /// @dev we use a hash of on-chain data to generate the random numbers
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
-
-    function selectWinner() external returns (uint256 request_id) {
+    function selectWinner() external nonReentrant returns (uint256 request_id) {
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
 
@@ -162,8 +166,7 @@ contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
         );
     }
 
-    function fulfillRandomWords(uint256, /* requestId */ uint256[] memory randomWords) internal override {
-        // not random, use Chainlink VRF
+    function fulfillRandomWords(uint256, /* requestId */ uint256[] memory randomWords) internal override nonReentrant {
         uint256 winnerIndex = randomWords[0] % players.length;
         address winner = players[winnerIndex];
         uint256 totalAmountCollected = players.length * entranceFee;
@@ -171,8 +174,6 @@ contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
         uint256 fee = (totalAmountCollected * 20) / 100;
         totalFees = totalFees + uint64(fee);
 
-        // not random, use Chainlink VRF
-        // We use a different RNG calculate from the winnerIndex to determine rarity
         uint256 rarity = randomWords[1] % 100;
         if (rarity <= COMMON_RARITY) {
             tokenIdToRarity[totalSupply] = COMMON_RARITY;
@@ -207,7 +208,6 @@ contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
         emit FeeAddressChanged(newFeeAddress);
     }
 
-    // tech debt - remove
     // /// @notice this function will return true if the msg.sender is an active player
     // function _isActivePlayer() internal view returns (bool) {
     //     for (uint256 i = 0; i < players.length; i++) {
@@ -218,7 +218,7 @@ contract PuppyRaffle is ERC721, VRFConsumerBaseV2, Ownable {
     //     return false;
     // }
 
-    /// @notice this could be a constant variable
+    // /// @notice this could be a constant variable
     // function _baseURI() internal pure returns (string memory) {
     //     return "data:application/json;base64,";
     // }

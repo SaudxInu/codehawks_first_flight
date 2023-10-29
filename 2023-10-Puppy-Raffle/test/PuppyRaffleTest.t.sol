@@ -6,6 +6,7 @@ import {Test, console} from "forge-std/Test.sol";
 import {PuppyRaffle} from "../src/PuppyRaffle.sol";
 import {DeployPuppyRaffle} from "../script/DeployPuppyRaffle.sol";
 import {VRFCoordinatorV2Mock} from "@chainlink/contracts/src/v0.8/mocks/VRFCoordinatorV2Mock.sol";
+import {Base64} from "lib/base64/base64.sol";
 
 contract PuppyRaffleTest is Test {
     PuppyRaffle puppyRaffle;
@@ -218,21 +219,83 @@ contract PuppyRaffleTest is Test {
         assertEq(puppyRaffle.balanceOf(previous_winner), 1);
     }
 
-    // Don't know token uri in advance.
-    // function testPuppyUriIsRight() public playersEntered {
-    //     vm.warp(block.timestamp + duration + 1);
-    //     vm.roll(block.number + 1);
+    function testPuppyUriIsRight() public playersEntered {
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
 
-    //     // Don't know token uri in advance.
-    //     string memory expectedTokenUri =
-    //         "data:application/json;base64,eyJuYW1lIjoiUHVwcHkgUmFmZmxlIiwgImRlc2NyaXB0aW9uIjoiQW4gYWRvcmFibGUgcHVwcHkhIiwgImF0dHJpYnV0ZXMiOiBbeyJ0cmFpdF90eXBlIjogInJhcml0eSIsICJ2YWx1ZSI6IGNvbW1vbn1dLCAiaW1hZ2UiOiJpcGZzOi8vUW1Tc1lSeDNMcERBYjFHWlFtN3paMUF1SFpqZmJQa0Q2SjdzOXI0MXh1MW1mOCJ9";
+        string memory expectedTokenUri1 = string(
+            abi.encodePacked(
+                "data:application/json;base64,",
+                Base64.encode(
+                    bytes(
+                        abi.encodePacked(
+                            '{"name":"',
+                            "Puppy Raffle",
+                            '", "description":"An adorable puppy!", ',
+                            '"attributes": [{"trait_type": "rarity", "value": ',
+                            "common",
+                            '}], "image":"',
+                            "ipfs://QmSsYRx3LpDAb1GZQm7zZ1AuHZjfbPkD6J7s9r41xu1mf8",
+                            '"}'
+                        )
+                    )
+                )
+            )
+        );
+        string memory expectedTokenUri2 = string(
+            abi.encodePacked(
+                "data:application/json;base64,",
+                Base64.encode(
+                    bytes(
+                        abi.encodePacked(
+                            '{"name":"',
+                            "Puppy Raffle",
+                            '", "description":"An adorable puppy!", ',
+                            '"attributes": [{"trait_type": "rarity", "value": ',
+                            "rare",
+                            '}], "image":"',
+                            "ipfs://QmUPjADFGEKmfohdTaNcWhp7VGk26h5jXDA7v3VtTnTLcW",
+                            '"}'
+                        )
+                    )
+                )
+            )
+        );
+        string memory expectedTokenUri3 = string(
+            abi.encodePacked(
+                "data:application/json;base64,",
+                Base64.encode(
+                    bytes(
+                        abi.encodePacked(
+                            '{"name":"',
+                            "Puppy Raffle",
+                            '", "description":"An adorable puppy!", ',
+                            '"attributes": [{"trait_type": "rarity", "value": ',
+                            "legendary",
+                            '}], "image":"',
+                            "ipfs://QmYx6GsYAKnNzZ9A6NvEKV9nf1VaDzJrqDR23Y8YSkebLU",
+                            '"}'
+                        )
+                    )
+                )
+            )
+        );
 
-    //     uint256 request_id = puppyRaffle.selectWinner();
+        uint256 request_id = puppyRaffle.selectWinner();
 
-    //     vrfCoordinatorV2Mock.fulfillRandomWords(request_id, address(puppyRaffle));
+        vrfCoordinatorV2Mock.fulfillRandomWords(request_id, address(puppyRaffle));
 
-    //     assertEq(puppyRaffle.tokenURI(0), expectedTokenUri);
-    // }
+        assertEq(
+            (
+                keccak256(abi.encodePacked(puppyRaffle.tokenURI(0))) == keccak256(abi.encodePacked(expectedTokenUri1))
+                    || keccak256(abi.encodePacked(puppyRaffle.tokenURI(0)))
+                        == keccak256(abi.encodePacked(expectedTokenUri2))
+                    || keccak256(abi.encodePacked(puppyRaffle.tokenURI(0)))
+                        == keccak256(abi.encodePacked(expectedTokenUri3))
+            ),
+            true
+        );
+    }
 
     //////////////////////
     /// withdrawFees         ///
@@ -246,15 +309,16 @@ contract PuppyRaffleTest is Test {
         vm.warp(block.timestamp + duration + 1);
         vm.roll(block.number + 1);
 
-        uint256 puppyRaffleBalanceBefore = address(puppyRaffle).balance;
+        uint256 balanceBefore = feeAddress.balance;
 
         uint256 expectedPrizeAmount = ((entranceFee * 4) * 20) / 100;
 
         uint256 request_id = puppyRaffle.selectWinner();
 
         vrfCoordinatorV2Mock.fulfillRandomWords(request_id, address(puppyRaffle));
+
         puppyRaffle.withdrawFees();
-        // assertEq(feeAddress.balance, expectedPrizeAmount);
-        assertEq(address(puppyRaffle).balance, puppyRaffleBalanceBefore - entranceFee * 4);
+
+        assertEq(feeAddress.balance, balanceBefore + expectedPrizeAmount);
     }
 }
